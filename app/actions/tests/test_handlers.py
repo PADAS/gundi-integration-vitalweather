@@ -78,12 +78,16 @@ async def test_action_pull_observations_triggers_pull_station_history(mocker, in
     mock_trigger_action.assert_called_once()
 
 @pytest.mark.asyncio
-async def test_action_pull_observations_error(mocker, integration_v2):
+async def test_action_pull_observations_error(mocker, integration_v2, mock_publish_event):
     mocker.patch('app.actions.client.get_stations', new=AsyncMock(side_effect=VWException(
         error=Exception("Incorrect KEY"),
         message="Incorrect KEY",
         status_code=400
     )))
+    mocker.patch("app.services.state.IntegrationStateManager.get_state", return_value=None)
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_scheduler.publish_event", mock_publish_event)
 
     integration = integration_v2
 
@@ -96,7 +100,7 @@ async def test_action_pull_observations_error(mocker, integration_v2):
         await action_pull_observations(integration, action_config)
 
 @pytest.mark.asyncio
-async def test_action_pull_station_history_success(mocker, integration_v2):
+async def test_action_pull_station_history_success(mocker, integration_v2, mock_publish_event):
     action_config = PullStationHistoryConfig(
         station=Station(
             Station_ID=123,
@@ -116,6 +120,10 @@ async def test_action_pull_station_history_success(mocker, integration_v2):
     # Modify auth config
     integration.configurations[2].data = {"key": "testkey"}
 
+    mocker.patch("app.services.state.IntegrationStateManager.get_state", return_value=None)
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_scheduler.publish_event", mock_publish_event)
     mocker.patch('app.actions.client.get_station_history', new=AsyncMock(return_value=mock_history_response))
     mocker.patch('app.services.state.IntegrationStateManager.set_state', new=AsyncMock())
     mocker.patch('app.services.utils.generate_batches', return_value=[[{}]])
@@ -146,7 +154,7 @@ async def test_action_pull_station_history_success(mocker, integration_v2):
     assert result == {"observations_extracted": 1}
 
 @pytest.mark.asyncio
-async def test_action_pull_station_history_error(mocker, integration_v2):
+async def test_action_pull_station_history_error(mocker, integration_v2, mock_publish_event):
     action_config = PullStationHistoryConfig(
         station=Station(
             Station_ID=123,
@@ -158,6 +166,10 @@ async def test_action_pull_station_history_error(mocker, integration_v2):
         from_timestamp=1234567890,
         to_timestamp=1234567891
     )
+    mocker.patch("app.services.state.IntegrationStateManager.get_state", return_value=None)
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_scheduler.publish_event", mock_publish_event)
 
     integration = integration_v2
 
