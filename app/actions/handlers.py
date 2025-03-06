@@ -99,7 +99,6 @@ async def action_pull_observations(integration, action_config: PullObservationsC
 
                 parsed_config = PullStationHistoryConfig(
                     station=station,
-                    key=auth_config.key,
                     from_timestamp=start,
                     to_timestamp=ceil(now.timestamp())
                 )
@@ -124,10 +123,11 @@ async def action_pull_station_history(integration, action_config: PullStationHis
     logger.info(f"Executing action 'pull_station_history' for integration ID {integration.id} and action_config {action_config}...")
 
     base_url = integration.base_url or VW_BASE_URL
+    auth_config = get_auth_config(integration)
     observations_extracted = 0
 
     try:
-        history_response = await client.get_station_history(integration, base_url, action_config)
+        history_response = await client.get_station_history(integration, base_url, action_config, auth_config)
         if history_response:
             logger.info(f"Extracted {len(history_response.History)} observations for station {action_config.station.Station_ID}.")
             transformed_data = transform(action_config.station, history_response)
@@ -152,11 +152,11 @@ async def action_pull_station_history(integration, action_config: PullStationHis
         else:
             logger.warning(f"No observations found for station {action_config.station.Station_ID}")
             return {"observations_extracted": 0}
-    except (client.VWUnauthorizedException, client.VWNotFoundException) as e:
+    except client.VWUnauthorizedException as e:
         message = f"Failed to authenticate with integration {integration.id} using {action_config}. Exception: {e}"
         logger.exception(message)
         raise e
-    except httpx.HTTPStatusError as e:
-        message = f"'pull_station_history' action error with integration {integration.id} using {action_config}. Exception: {e}"
+    except client.VWNotFoundException as e:
+        message = f"Not found response with integration {integration.id} using {action_config}. Exception: {e}"
         logger.exception(message)
         raise e

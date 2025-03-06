@@ -139,12 +139,12 @@ async def get_stations(integration, base_url, auth):
 
 
 @stamina.retry(on=httpx.HTTPError, wait_initial=4.0, wait_jitter=5.0, wait_max=32.0)
-async def get_station_history(integration, base_url, config):
+async def get_station_history(integration, base_url, config, auth):
     async with httpx.AsyncClient(timeout=120) as session:
         url = f"{base_url}/history.php"
         params = {
             "ID": config.station.Station_ID,
-            "key": config.key.get_secret_value(),
+            "key": auth.key.get_secret_value(),
             "from": config.from_timestamp,
             "to": config.to_timestamp,
         }

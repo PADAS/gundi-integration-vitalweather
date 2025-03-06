@@ -23,9 +23,8 @@ class PullObservationsConfig(PullActionConfiguration):
     )
 
 
-class PullStationHistoryConfig(PullActionConfiguration, InternalActionConfiguration):
+class PullStationHistoryConfig(InternalActionConfiguration):
     station: Station
-    key: pydantic.SecretStr
     from_timestamp: int
     to_timestamp: int
 
