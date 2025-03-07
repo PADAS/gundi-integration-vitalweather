@@ -20,7 +20,6 @@ VW_BASE_URL = "https://www.vitalweather.co.za/api/v1"
 
 
 def transform(station, observations):
-    transformed_data = []
     def match_units(history, units):
         for record in history:
             for key, value in record.items():
@@ -31,26 +30,21 @@ def transform(station, observations):
     readings = match_units([h.dict(by_alias=True) for h in observations.History], observations.unites.dict())
 
     for reading in readings:
-        transformed_data.append(
-            {
-                "source_name": station.Station_Name,
-                "source": station.Station_ID,
-                "type": "stationary-object",
-                "subtype": "weather_station",
-                "recorded_at": reading.pop("ts"),
-                "location": {
-                    "lat": station.latitude,
-                    "lon": station.longitude
-                },
-                "additional": {
-                    "station_height": station.height,
-                    **reading
-                }
+        yield {
+            "source_name": station.Station_Name,
+            "source": station.Station_ID,
+            "type": "stationary-object",
+            "subtype": "weather_station",
+            "recorded_at": reading.pop("ts"),
+            "location": {
+                "lat": station.latitude,
+                "lon": station.longitude
+            },
+            "additional": {
+                "station_height": station.height,
+                **reading
             }
-        )
-
-
-    return transformed_data
+        }
 
 
 async def action_auth(integration, action_config: AuthenticateConfig):
