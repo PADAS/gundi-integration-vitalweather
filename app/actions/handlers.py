@@ -126,7 +126,7 @@ async def action_pull_station_history(integration, action_config: PullStationHis
             logger.info(f"Extracted {len(history_response.History)} observations for station {action_config.station.Station_ID}.")
             transformed_data = transform(action_config.station, history_response)
 
-            for i, batch in enumerate(generate_batches(transformed_data, 200)):
+            for i, batch in enumerate(generate_batches(list(transformed_data), 200)):
                 logger.info(f'Sending observations batch #{i}: {len(batch)} observations. station: {action_config.station.Station_ID}')
                 response = await send_observations_to_gundi(observations=batch, integration_id=integration.id)
                 observations_extracted += len(response)
