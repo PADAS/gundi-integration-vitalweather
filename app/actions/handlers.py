@@ -25,7 +25,7 @@ def transform(station, observations):
                     record[key] = f"{value} {units[key]}"
         return conditions
 
-    readings = match_units([h.dict() for h in observations.conditions], observations.unites.dict())
+    readings = match_units([h.dict() for h in observations.conditions], observations.units.dict())
 
     for reading in readings:
         yield {

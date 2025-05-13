@@ -54,7 +54,7 @@ class ConditionsItem(pydantic.BaseModel):
         return v
 
 
-class Unites(pydantic.BaseModel):
+class Units(pydantic.BaseModel):
     local_time_last_update: str
     ts: str
     temperature: str
@@ -69,7 +69,7 @@ class Unites(pydantic.BaseModel):
 
 class ConditionsResponse(pydantic.BaseModel):
     conditions: List[ConditionsItem]
-    unites: Unites
+    units: Units = pydantic.Field(alias='unites')
     generated_at: datetime
     code: int
     message: str
@@ -79,6 +79,9 @@ class ConditionsResponse(pydantic.BaseModel):
         if not v.tzinfo:
             return v.replace(tzinfo=timezone.utc)
         return v
+
+    class Config:
+        allow_population_by_field_name = True
 
 
 class VWException(Exception):
