@@ -33,17 +33,18 @@ class StationsResponse(pydantic.BaseModel):
         return v
 
 
-class HistoryItem(pydantic.BaseModel):
+class ConditionsItem(pydantic.BaseModel):
+    station_id: int
+    station_Name: str
     ts: datetime
     pressure: float
     temperature: float
     humidity: int
-    wind_min: int
-    wind_avg: float = pydantic.Field(alias='wind_average')
-    wind_max: float
-    wind_dir: int = pydantic.Field(alias='wind_direction')
-    Rain: float = pydantic.Field(alias='total_rain')
-    uv: float
+    wind_average: float
+    max_wind: float
+    wind_direction: int
+    total_rain: float
+    FDI: int
     solar_radiation: float
 
     @pydantic.validator('ts', always=True)
@@ -52,11 +53,8 @@ class HistoryItem(pydantic.BaseModel):
             return v.replace(tzinfo=timezone.utc)
         return v
 
-    class Config:
-        allow_population_by_field_name = True
 
-
-class Unites(pydantic.BaseModel):
+class Units(pydantic.BaseModel):
     local_time_last_update: str
     ts: str
     temperature: str
@@ -69,9 +67,9 @@ class Unites(pydantic.BaseModel):
     FDI: str
 
 
-class HistoryResponse(pydantic.BaseModel):
-    History: List[HistoryItem]
-    unites: Unites
+class ConditionsResponse(pydantic.BaseModel):
+    conditions: List[ConditionsItem]
+    units: Units = pydantic.Field(alias='unites')
     generated_at: datetime
     code: int
     message: str
@@ -81,6 +79,9 @@ class HistoryResponse(pydantic.BaseModel):
         if not v.tzinfo:
             return v.replace(tzinfo=timezone.utc)
         return v
+
+    class Config:
+        allow_population_by_field_name = True
 
 
 class VWException(Exception):
@@ -139,22 +140,19 @@ async def get_stations(integration, base_url, auth):
 
 
 @stamina.retry(on=httpx.HTTPError, wait_initial=4.0, wait_jitter=5.0, wait_max=32.0)
-async def get_station_history(integration, base_url, config, auth):
+async def get_station_conditions(integration, base_url, config, auth):
     async with httpx.AsyncClient(timeout=120) as session:
-        url = f"{base_url}/history.php"
+        url = f"{base_url}/conditions.php/{config.station.Station_ID}"
         params = {
-            "ID": config.station.Station_ID,
             "key": auth.key.get_secret_value(),
-            "from": config.from_timestamp,
-            "to": config.to_timestamp,
         }
 
-        logger.info(f"-- Getting historic conditions for integration ID: {integration.id} Station ID: {config.station.Station_ID} --")
+        logger.info(f"-- Getting latest conditions for integration ID: {integration.id} Station ID: {config.station.Station_ID} --")
 
         try:
             response = await session.get(url, params=params)
             if response.is_error:
-                logger.error(f"Error 'get_station_history'. Response body: {response.text}")
+                logger.error(f"Error 'get_station_conditions'. Response body: {response.text}")
             response.raise_for_status()
             parsed_response = response.json()
             if parsed_response:
@@ -164,7 +162,7 @@ async def get_station_history(integration, base_url, config, auth):
                         message=parsed_response["message"],
                         status_code=parsed_response["code"]
                     )
-                obs = HistoryResponse.parse_obj(parsed_response)
+                obs = ConditionsResponse.parse_obj(parsed_response)
                 return obs
             else:
                 return response.text

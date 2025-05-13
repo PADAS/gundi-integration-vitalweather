@@ -3,8 +3,8 @@ import pytest
 from app import settings
 from unittest.mock import AsyncMock
 from datetime import datetime
-from app.actions.handlers import action_auth, action_pull_observations, action_pull_station_history
-from app.actions.configurations import AuthenticateConfig, PullObservationsConfig, PullStationHistoryConfig
+from app.actions.handlers import action_auth, action_pull_observations, action_pull_station_conditions
+from app.actions.configurations import AuthenticateConfig, PullObservationsConfig, PullStationConditionsConfig
 from app.actions.client import VWException, Station, StationsResponse
 
 
@@ -35,7 +35,7 @@ async def test_action_auth_error(mocker):
     assert result == {"valid_credentials": False, "status_code": 400, "message": "Incorrect KEY"}
 
 @pytest.mark.asyncio
-async def test_action_pull_observations_triggers_pull_station_history(mocker, integration_v2, mock_publish_event):
+async def test_action_pull_observations_triggers_pull_station_conditions(mocker, integration_v2, mock_publish_event):
     settings.TRIGGER_ACTIONS_ALWAYS_SYNC = False
     settings.INTEGRATION_COMMANDS_TOPIC = "vitalweather-actions-topic"
 
@@ -100,20 +100,18 @@ async def test_action_pull_observations_error(mocker, integration_v2, mock_publi
         await action_pull_observations(integration, action_config)
 
 @pytest.mark.asyncio
-async def test_action_pull_station_history_success(mocker, integration_v2, mock_publish_event):
-    action_config = PullStationHistoryConfig(
+async def test_action_pull_station_conditions_success(mocker, integration_v2, mock_publish_event):
+    action_config = PullStationConditionsConfig(
         station=Station(
             Station_ID=123,
             Station_Name="Test Station",
             latitude=-15.92883055,
             longitude=34.606880555,
             height=166.6
-        ),
-        from_timestamp=1234567890,
-        to_timestamp=1234567891
+        )
     )
-    mock_history_response = mocker.Mock()
-    mock_history_response.History = [mocker.Mock(ts=datetime.fromtimestamp(1234567890))]
+    mock_conditions_response = mocker.Mock()
+    mock_conditions_response.conditions = [mocker.Mock(ts=datetime.fromtimestamp(1234567890))]
 
     integration = integration_v2
 
@@ -124,7 +122,7 @@ async def test_action_pull_station_history_success(mocker, integration_v2, mock_
     mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
     mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
     mocker.patch("app.services.action_scheduler.publish_event", mock_publish_event)
-    mocker.patch('app.actions.client.get_station_history', new=AsyncMock(return_value=mock_history_response))
+    mocker.patch('app.actions.client.get_station_conditions', new=AsyncMock(return_value=mock_conditions_response))
     mocker.patch('app.services.state.IntegrationStateManager.set_state', new=AsyncMock())
     mocker.patch('app.services.utils.generate_batches', return_value=[[{}]])
     mocker.patch('app.actions.handlers.send_observations_to_gundi', new=AsyncMock(return_value=[{}]))
@@ -150,21 +148,19 @@ async def test_action_pull_station_history_success(mocker, integration_v2, mock_
         'type': 'stationary-object'
     }])
 
-    result = await action_pull_station_history(integration, action_config)
+    result = await action_pull_station_conditions(integration, action_config)
     assert result == {"observations_extracted": 1}
 
 @pytest.mark.asyncio
-async def test_action_pull_station_history_error(mocker, integration_v2, mock_publish_event):
-    action_config = PullStationHistoryConfig(
+async def test_action_pull_station_conditions_error(mocker, integration_v2, mock_publish_event):
+    action_config = PullStationConditionsConfig(
         station=Station(
             Station_ID=123,
             Station_Name="Test Station",
             latitude=-15.92883055,
             longitude=34.606880555,
             height=166.6
-        ),
-        from_timestamp=1234567890,
-        to_timestamp=1234567891
+        )
     )
     mocker.patch("app.services.state.IntegrationStateManager.get_state", return_value=None)
     mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
@@ -176,11 +172,11 @@ async def test_action_pull_station_history_error(mocker, integration_v2, mock_pu
     # Modify auth config
     integration.configurations[2].data = {"key": "testkey"}
 
-    mocker.patch('app.actions.client.get_station_history', new=AsyncMock(side_effect=VWException(
+    mocker.patch('app.actions.client.get_station_conditions', new=AsyncMock(side_effect=VWException(
         error=Exception("Incorrect KEY"),
         message="Incorrect KEY",
         status_code=400
     )))
 
     with pytest.raises(VWException):
-        await action_pull_station_history(integration, action_config)
+        await action_pull_station_conditions(integration, action_config)

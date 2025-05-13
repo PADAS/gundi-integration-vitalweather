@@ -23,10 +23,8 @@ class PullObservationsConfig(PullActionConfiguration):
     )
 
 
-class PullStationHistoryConfig(InternalActionConfiguration):
+class PullStationConditionsConfig(InternalActionConfiguration):
     station: Station
-    from_timestamp: int
-    to_timestamp: int
 
 
 def get_auth_config(integration):
