@@ -183,7 +183,7 @@ async def action_fetch_daily_summary(integration, action_config: FetchDailySumma
                             response = await send_events_to_gundi(events=batch, integration_id=integration.id)
                             summaries_fetched += len(response)
 
-            return {"summaries_fetched": summaries_fetched}
+        return {"summaries_fetched": summaries_fetched}
     except (client.VWUnauthorizedException, client.VWNotFoundException, client.VWException) as e:
         message = f"Failed to authenticate with integration {integration.id} using {auth_config}. Exception: {e}"
         logger.exception(message)
