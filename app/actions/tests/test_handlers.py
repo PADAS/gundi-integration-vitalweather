@@ -3,9 +3,19 @@ import pytest
 from app import settings
 from unittest.mock import AsyncMock
 from datetime import datetime
-from app.actions.handlers import action_auth, action_pull_observations, action_pull_station_conditions
-from app.actions.configurations import AuthenticateConfig, PullObservationsConfig, PullStationConditionsConfig
-from app.actions.client import VWException, Station, StationsResponse
+from app.actions.handlers import (
+    action_auth,
+    action_pull_observations,
+    action_pull_station_conditions,
+    action_fetch_daily_summary
+)
+from app.actions.configurations import (
+    AuthenticateConfig,
+    PullObservationsConfig,
+    PullStationConditionsConfig,
+    FetchDailySummaryConfig
+)
+from app.actions.client import VWException, Station, StationsResponse, DailySummaryResponse
 
 
 @pytest.mark.asyncio
@@ -180,3 +190,132 @@ async def test_action_pull_station_conditions_error(mocker, integration_v2, mock
 
     with pytest.raises(VWException):
         await action_pull_station_conditions(integration, action_config)
+
+
+@pytest.mark.asyncio
+async def test_action_fetch_daily_summary_success(mocker, integration_v2, mock_publish_event):
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_scheduler.publish_event", mock_publish_event)
+    mocker.patch('app.services.utils.generate_batches', return_value=[[{}]])
+    mocker.patch('app.actions.handlers.send_events_to_gundi', new=AsyncMock(return_value=[{}]))
+
+    mocker.patch('app.actions.client.get_stations', new=AsyncMock(return_value=StationsResponse.parse_obj(
+        {
+            "stations": [
+                {
+                    "Station_ID": 123,
+                    "Station_Name": "Test Station",
+                    "latitude": -15.92883055,
+                    "longitude": 34.606880555,
+                    "height": 166.6
+                }
+            ],
+            "generated_at": 1739811533,
+            "code": 200,
+            "message": "success"
+        }
+    )))
+
+    mocker.patch("app.actions.client.get_daily_summary", new=AsyncMock(return_value=DailySummaryResponse.parse_obj(
+        {
+            "dailysummary": [
+                {
+                    "station_id": 123,
+                    "Date": "2025-03-03",
+                    "rain": 58.8,
+                    "avg_temp": 21.6,
+                    "min_temp": 20.6,
+                    "max_temp": 22.8,
+                    "avg_RH": 94,
+                    "min_RH": 92,
+                    "max_RH": 95,
+                    "avg_wind": 0.1,
+                    "avg_solar": 0,
+                    "avg_pressure": 1003.71,
+                    "min_pressure": 1002.51,
+                    "max_pressure": 1005.28,
+                    "avg_winddirection": [
+                        225,
+                        "SW"
+                    ]
+                }
+            ],
+            "unites": {
+                "rain": "mm",
+                "avg_temp": "°C",
+                "max_temp": "°C",
+                "min_temp": "°C",
+                "avg_RH": "%",
+                "max_hum": "%",
+                "min_hum": "%",
+                "avg_wind": "kph",
+                "avg_solar": "Watts/M",
+                "avg_pressure": "mb",
+                "min_pressure": "mb",
+                "max_pressure": "mb",
+                "avg_winddirection": [
+                    "°",
+                    "DIR"
+                ]
+            },
+            "generated_at": 1747242490,
+            "code": 200,
+            "message": "success"
+        }
+    )))
+    mocker.patch("app.services.utils.generate_batches", return_value=[[{"event": "test_event"}]])
+    mocker.patch("app.services.gundi.send_events_to_gundi", return_value=AsyncMock(return_value=[{"status": "success"}]))
+
+    integration = integration_v2
+
+    # Modify auth config
+    integration.configurations[2].data = {"key": "testkey"}
+
+    action_config = FetchDailySummaryConfig()
+
+    result = await action_fetch_daily_summary(integration, action_config)
+    assert result == {"summaries_fetched": 1}
+
+
+@pytest.mark.asyncio
+async def test_action_fetch_daily_summary_no_stations(mocker, integration_v2, mock_publish_event):
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_scheduler.publish_event", mock_publish_event)
+
+    mocker.patch('app.actions.client.get_stations', new=AsyncMock(return_value=None))
+
+    integration = integration_v2
+
+    # Modify auth config
+    integration.configurations[2].data = {"key": "testkey"}
+
+    action_config = FetchDailySummaryConfig()
+
+    result = await action_fetch_daily_summary(integration, action_config)
+
+    assert result == {"summaries_fetched": 0}
+
+
+@pytest.mark.asyncio
+async def test_action_fetch_daily_summary_error(mocker, integration_v2, mock_publish_event):
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_scheduler.publish_event", mock_publish_event)
+
+    mocker.patch('app.actions.client.get_stations', new=AsyncMock(side_effect=VWException(
+        error=Exception("Incorrect KEY"),
+        message="Incorrect KEY",
+        status_code=400
+    )))
+
+    integration = integration_v2
+
+    # Modify auth config
+    integration.configurations[2].data = {"key": "testkey"}
+
+    action_config = FetchDailySummaryConfig()
+
+    with pytest.raises(Exception, match="'400: Incorrect KEY, Error: Incorrect KEY'"):
+        await action_fetch_daily_summary(integration, action_config)

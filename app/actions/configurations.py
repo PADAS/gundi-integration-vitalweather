@@ -27,6 +27,10 @@ class PullStationConditionsConfig(InternalActionConfiguration):
     station: Station
 
 
+class FetchDailySummaryConfig(PullActionConfiguration):
+    pass
+
+
 def get_auth_config(integration):
     # Look for the login credentials, needed for any action
     auth_config = find_config_for_action(

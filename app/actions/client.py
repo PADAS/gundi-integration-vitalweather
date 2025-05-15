@@ -4,7 +4,7 @@ import pydantic
 import stamina
 
 from datetime import datetime, timezone
-from typing import List
+from typing import List, Union
 from app.services.state import IntegrationStateManager
 
 
@@ -67,9 +67,60 @@ class Units(pydantic.BaseModel):
     FDI: str
 
 
+class DailySummaryUnits(pydantic.BaseModel):
+    rain: str
+    avg_temp: str
+    max_temp: str
+    min_temp: str
+    avg_RH: str
+    max_hum: str
+    min_hum: str
+    avg_wind: str
+    avg_solar: str
+    avg_pressure: str
+    min_pressure: str
+    max_pressure: str
+    avg_winddirection: List[str]
+
+
 class ConditionsResponse(pydantic.BaseModel):
     conditions: List[ConditionsItem]
     units: Units = pydantic.Field(alias='unites')
+    generated_at: datetime
+    code: int
+    message: str
+
+    @pydantic.validator('generated_at', always=True)
+    def parse_time_string(cls, v):
+        if not v.tzinfo:
+            return v.replace(tzinfo=timezone.utc)
+        return v
+
+    class Config:
+        allow_population_by_field_name = True
+
+
+class DailySummaryItem(pydantic.BaseModel):
+    station_id: int
+    Date: str
+    rain: float
+    avg_temp: float
+    min_temp: float
+    max_temp: float
+    avg_RH: int
+    min_RH: int
+    max_RH: int
+    avg_wind: float
+    avg_solar: int
+    avg_pressure: float
+    min_pressure: float
+    max_pressure: float
+    avg_winddirection: List[Union[int, str]]
+
+
+class DailySummaryResponse(pydantic.BaseModel):
+    dailysummary: List[DailySummaryItem]
+    units: DailySummaryUnits = pydantic.Field(alias='unites')
     generated_at: datetime
     code: int
     message: str
@@ -164,6 +215,41 @@ async def get_station_conditions(integration, base_url, config, auth):
                     )
                 obs = ConditionsResponse.parse_obj(parsed_response)
                 return obs
+            else:
+                return response.text
+        except httpx.HTTPStatusError as e:
+            if e.response.status_code == 401:
+                raise VWUnauthorizedException(e, "Unauthorized access")
+            elif e.response.status_code == 404:
+                raise VWNotFoundException(e, "User not found")
+            raise e
+
+
+@stamina.retry(on=httpx.HTTPError, wait_initial=4.0, wait_jitter=5.0, wait_max=32.0)
+async def get_daily_summary(integration, base_url, station, config):
+    async with httpx.AsyncClient(timeout=120) as session:
+        url = f"{base_url}/dailysummary.php/{station.Station_ID}"
+        params = {
+            "key": config.key.get_secret_value(),
+        }
+
+        logger.info(f"-- Getting daily summary for integration ID: {integration.id} Station: {station.Station_ID} --")
+
+        try:
+            response = await session.get(url, params=params)
+            if response.is_error:
+                logger.error(f"Error 'get_daily_summary'. Response body: {response.text}")
+            response.raise_for_status()
+            parsed_response = response.json()
+            if parsed_response:
+                if parsed_response["code"] != 200:
+                    raise VWException(
+                        error=Exception(parsed_response["message"]),
+                        message=parsed_response["message"],
+                        status_code=parsed_response["code"]
+                    )
+                summary = DailySummaryResponse.parse_obj(parsed_response)
+                return summary
             else:
                 return response.text
         except httpx.HTTPStatusError as e:
