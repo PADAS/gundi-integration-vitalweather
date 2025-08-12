@@ -1,7 +1,7 @@
 import pytest
 
 from app import settings
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, MagicMock
 from datetime import datetime
 from app.actions.handlers import (
     action_auth,
@@ -15,7 +15,7 @@ from app.actions.configurations import (
     PullStationConditionsConfig,
     FetchDailySummaryConfig
 )
-from app.actions.client import VWException, Station, StationsResponse, DailySummaryResponse
+from app.actions.client import VWException, Station, StationsResponse, DailySummaryResponse, LogLevel
 
 
 @pytest.mark.asyncio
@@ -160,6 +160,60 @@ async def test_action_pull_station_conditions_success(mocker, integration_v2, mo
 
     result = await action_pull_station_conditions(integration, action_config)
     assert result == {"observations_extracted": 1}
+
+
+@pytest.mark.asyncio
+async def test_action_pull_station_conditions_bad_conditions_response(mocker, integration_v2, mock_publish_event):
+    action_config = PullStationConditionsConfig(
+        station=Station(
+            Station_ID=123,
+            Station_Name="Test Station",
+            latitude=-15.92883055,
+            longitude=34.606880555,
+            height=166.6
+        )
+    )
+
+    integration = integration_v2
+
+    # Modify auth config
+    integration.configurations[2].data = {"key": "testkey"}
+
+    mocker.patch("app.services.state.IntegrationStateManager.get_state", return_value=None)
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_scheduler.publish_event", mock_publish_event)
+    mocker.patch('app.services.state.IntegrationStateManager.set_state', new=AsyncMock())
+
+    bad_response = {
+        "code": 200,
+        "conditions": [{'station_id': 123, 'fault_status': 11, 'message': 'no data'}],  # Real bad response from vitalweather
+        "unites": {},
+        "generated_at": "2025-05-12T00:00:00Z",
+        "message": "ok"
+    }
+
+    mock_httpx_response = MagicMock()
+    mock_httpx_response.is_error = False
+    mock_httpx_response.json.return_value = bad_response
+    mock_httpx_response.text = str(bad_response)
+    mock_httpx_response.raise_for_status = MagicMock()
+
+    mocker.patch("httpx.AsyncClient.get", return_value=mock_httpx_response)
+
+    mock_log = mocker.patch("app.actions.client.log_action_activity", new_callable=AsyncMock)
+
+    result = await action_pull_station_conditions(integration, action_config)
+
+    assert result == {"observations_extracted": 0}
+
+    # Check that the log was created
+    assert mock_log.await_count == 1
+    assert mock_log.call_args[1]["integration_id"] == integration.id
+    assert mock_log.call_args[1]["action_id"] == "pull_station_conditions"
+    assert mock_log.call_args[1]["level"] == LogLevel.WARNING
+    assert mock_log.call_args[1]["title"] == f"Get station conditions error for station '123'"
+
 
 @pytest.mark.asyncio
 async def test_action_pull_station_conditions_error(mocker, integration_v2, mock_publish_event):

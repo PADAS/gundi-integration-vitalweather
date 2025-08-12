@@ -5,6 +5,10 @@ import stamina
 
 from datetime import datetime, timezone
 from typing import List, Union
+
+from gundi_core.schemas.v2 import LogLevel
+
+from app.services.activity_logger import log_action_activity
 from app.services.state import IntegrationStateManager
 
 
@@ -213,8 +217,20 @@ async def get_station_conditions(integration, base_url, config, auth):
                         message=parsed_response["message"],
                         status_code=parsed_response["code"]
                     )
-                obs = ConditionsResponse.parse_obj(parsed_response)
-                return obs
+                try:
+                    obs = ConditionsResponse.parse_obj(parsed_response)
+                    return obs
+                except pydantic.ValidationError as e:
+                    msg = f"Response: {parsed_response['conditions']}. Exception: {e}"
+                    logger.error(msg)
+                    await log_action_activity(
+                        integration_id=integration.id,
+                        action_id="pull_station_conditions",
+                        level=LogLevel.WARNING,
+                        title=f"Get station conditions error for station '{config.station.Station_ID}'",
+                        data={"message": msg}
+                    )
+                    return None
             else:
                 return response.text
         except httpx.HTTPStatusError as e:
