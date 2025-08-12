@@ -212,7 +212,7 @@ async def test_action_pull_station_conditions_bad_conditions_response(mocker, in
     assert mock_log.call_args[1]["integration_id"] == integration.id
     assert mock_log.call_args[1]["action_id"] == "pull_station_conditions"
     assert mock_log.call_args[1]["level"] == LogLevel.WARNING
-    assert mock_log.call_args[1]["title"] == f"Get station conditions error for station '123'"
+    assert mock_log.call_args[1]["title"] == f"Station 123 reported an error."
 
 
 @pytest.mark.asyncio

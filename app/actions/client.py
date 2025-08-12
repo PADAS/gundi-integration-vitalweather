@@ -217,6 +217,24 @@ async def get_station_conditions(integration, base_url, config, auth):
                         message=parsed_response["message"],
                         status_code=parsed_response["code"]
                     )
+
+                if any("fault_status" in cond for cond in parsed_response.get("conditions", [])):
+                    faults = [
+                        (f'Fault status: {cond.get("fault_status")}', f'Message: {cond.get("message")}')
+                        for cond in parsed_response.get("conditions", [])
+                    ]
+
+                    msg = f"Station {config.station.Station_ID} has a fault status. Response: {parsed_response['conditions']}"
+                    logger.warning(msg)
+                    await log_action_activity(
+                        integration_id=integration.id,
+                        action_id="pull_station_conditions",
+                        level=LogLevel.WARNING,
+                        title=f"Station {config.station.Station_ID} reported an error.",
+                        data={"faults": faults}
+                    )
+                    return None
+
                 try:
                     obs = ConditionsResponse.parse_obj(parsed_response)
                     return obs
