@@ -6,9 +6,6 @@ import stamina
 from datetime import datetime, timezone
 from typing import List, Union
 
-from gundi_core.schemas.v2 import LogLevel
-
-from app.services.activity_logger import log_action_activity
 from app.services.state import IntegrationStateManager
 
 
@@ -164,26 +161,25 @@ class VWUnauthorizedException(Exception):
 
 
 @stamina.retry(on=httpx.HTTPError, wait_initial=4.0, wait_jitter=5.0, wait_max=32.0)
-async def get_stations(integration, base_url, auth):
-    async with httpx.AsyncClient(timeout=120) as session:
+async def get_stations(integration, base_url, key):
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=30.0, write=15.0, pool=5.0)) as session:
         logger.info(f"-- Getting stations for integration ID: {integration.id} --")
 
         url = f"{base_url}/stations.php"
 
         try:
-            response = await session.get(url, params={"key": auth.key.get_secret_value()})
+            response = await session.get(url, params={"key": key})
             if response.is_error:
                 logger.error(f"Error 'get_stations'. Response body: {response.text}")
             response.raise_for_status()
-            parsed_response = response.json()
-            if parsed_response:
+            if parsed_response := response.json():
                 if parsed_response["code"] != 200:
                     raise VWException(
                         error=Exception(parsed_response["message"]),
                         message=parsed_response["message"],
                         status_code=parsed_response["code"]
                     )
-                return StationsResponse.parse_obj(parsed_response)
+                return parsed_response
             else:
                 return response.text
         except httpx.HTTPStatusError as e:
@@ -195,60 +191,28 @@ async def get_stations(integration, base_url, auth):
 
 
 @stamina.retry(on=httpx.HTTPError, wait_initial=4.0, wait_jitter=5.0, wait_max=32.0)
-async def get_station_conditions(integration, base_url, config, auth):
-    async with httpx.AsyncClient(timeout=120) as session:
-        url = f"{base_url}/conditions.php/{config.station.Station_ID}"
+async def get_station_conditions(integration, base_url, station_id, key):
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=30.0, write=15.0, pool=5.0)) as session:
+        url = f"{base_url}/conditions.php/{station_id}"
         params = {
-            "key": auth.key.get_secret_value(),
+            "key": key,
         }
 
-        logger.info(f"-- Getting latest conditions for integration ID: {integration.id} Station ID: {config.station.Station_ID} --")
+        logger.info(f"-- Getting latest conditions for integration ID: {integration.id} Station ID: {station_id} --")
 
         try:
             response = await session.get(url, params=params)
             if response.is_error:
                 logger.error(f"Error 'get_station_conditions'. Response body: {response.text}")
             response.raise_for_status()
-            parsed_response = response.json()
-            if parsed_response:
+            if parsed_response := response.json():
                 if parsed_response["code"] != 200:
                     raise VWException(
                         error=Exception(parsed_response["message"]),
                         message=parsed_response["message"],
                         status_code=parsed_response["code"]
                     )
-
-                if any("fault_status" in cond for cond in parsed_response.get("conditions", [])):
-                    faults = [
-                        (f'Fault status: {cond.get("fault_status")}', f'Message: {cond.get("message")}')
-                        for cond in parsed_response.get("conditions", [])
-                    ]
-
-                    msg = f"Station {config.station.Station_ID} has a fault status. Response: {parsed_response['conditions']}"
-                    logger.warning(msg)
-                    await log_action_activity(
-                        integration_id=integration.id,
-                        action_id="pull_station_conditions",
-                        level=LogLevel.WARNING,
-                        title=f"Station {config.station.Station_ID} reported an error.",
-                        data={"faults": faults}
-                    )
-                    return None
-
-                try:
-                    obs = ConditionsResponse.parse_obj(parsed_response)
-                    return obs
-                except pydantic.ValidationError as e:
-                    msg = f"Response: {parsed_response['conditions']}. Exception: {e}"
-                    logger.error(msg)
-                    await log_action_activity(
-                        integration_id=integration.id,
-                        action_id="pull_station_conditions",
-                        level=LogLevel.WARNING,
-                        title=f"Get station conditions error for station '{config.station.Station_ID}'",
-                        data={"message": msg}
-                    )
-                    return None
+                return parsed_response
             else:
                 return response.text
         except httpx.HTTPStatusError as e:
@@ -260,14 +224,14 @@ async def get_station_conditions(integration, base_url, config, auth):
 
 
 @stamina.retry(on=httpx.HTTPError, wait_initial=4.0, wait_jitter=5.0, wait_max=32.0)
-async def get_daily_summary(integration, base_url, station, config):
-    async with httpx.AsyncClient(timeout=120) as session:
-        url = f"{base_url}/dailysummary.php/{station.Station_ID}"
+async def get_daily_summary(integration, base_url, station_id, key):
+    async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=30.0, write=15.0, pool=5.0)) as session:
+        url = f"{base_url}/dailysummary.php/{station_id}"
         params = {
-            "key": config.key.get_secret_value(),
+            "key": key,
         }
 
-        logger.info(f"-- Getting daily summary for integration ID: {integration.id} Station: {station.Station_ID} --")
+        logger.info(f"-- Getting daily summary for integration ID: {integration.id} Station: {station_id} --")
 
         try:
             response = await session.get(url, params=params)
@@ -282,8 +246,7 @@ async def get_daily_summary(integration, base_url, station, config):
                         message=parsed_response["message"],
                         status_code=parsed_response["code"]
                     )
-                summary = DailySummaryResponse.parse_obj(parsed_response)
-                return summary
+                return parsed_response
             else:
                 return response.text
         except httpx.HTTPStatusError as e:

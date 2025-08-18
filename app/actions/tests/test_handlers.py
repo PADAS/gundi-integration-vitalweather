@@ -22,8 +22,21 @@ from app.actions.client import VWException, Station, StationsResponse, DailySumm
 async def test_action_auth_success(mocker):
     mock_integration = mocker.Mock()
     mock_action_config = AuthenticateConfig(key="testkey")
-    mock_response = mocker.Mock()
-    mock_response.stations = [mocker.Mock()]
+
+    mock_response = {
+        "stations": [
+            {
+                "Station_ID": 123,
+                "Station_Name": "Test Station",
+                "latitude": -33.9,
+                "longitude": 18.4,
+                "height": 10
+            }
+        ],
+        "generated_at": 1755016414,
+        "code": 200,
+        "message": "ok"
+    }
 
     mocker.patch('app.actions.client.get_stations', new=AsyncMock(return_value=mock_response))
 
@@ -120,13 +133,47 @@ async def test_action_pull_station_conditions_success(mocker, integration_v2, mo
             height=166.6
         )
     )
-    mock_conditions_response = mocker.Mock()
-    mock_conditions_response.conditions = [mocker.Mock(ts=datetime.fromtimestamp(1234567890))]
 
     integration = integration_v2
 
     # Modify auth config
     integration.configurations[2].data = {"key": "testkey"}
+
+    mock_conditions_response = {
+        "code": 200,
+        "conditions": [
+            {
+                "station_id": 123,
+                "station_Name": "Test Station",
+                "pressure": 995.3,
+                "temperature": 25.6,
+                "humidity": 88,
+                "wind_average": 0.0,
+                "max_wind": 3.2,
+                "wind_direction": 180,
+                "total_rain": 0.0,
+                "FDI": 0,
+                "solar_radiation": 0.0,
+                "fault_status": 0,
+                "message": "ok",
+                "ts": 1234567890
+            }
+        ],
+        "unites": {
+            "local_time_last_update": "UTC",
+            "ts": "s",
+            "temperature": "°C",
+            "humidity": "%",
+            "pressure": "mb",
+            "wind_average": "kph",
+            "wind_direction": "deg",
+            "total_rain": "mm",
+            "solar_radiation": "W/M2",
+            "FDI": "index"
+        },
+        "generated_at": "2025-05-12T00:00:00Z",
+        "message": "ok"
+    }
 
     mocker.patch("app.services.state.IntegrationStateManager.get_state", return_value=None)
     mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
@@ -163,7 +210,7 @@ async def test_action_pull_station_conditions_success(mocker, integration_v2, mo
 
 
 @pytest.mark.asyncio
-async def test_action_pull_station_conditions_bad_conditions_response(mocker, integration_v2, mock_publish_event):
+async def test_action_pull_station_conditions_fault_status_sends_warning_activity_log(mocker, integration_v2, mock_publish_event):
     action_config = PullStationConditionsConfig(
         station=Station(
             Station_ID=123,
@@ -188,7 +235,18 @@ async def test_action_pull_station_conditions_bad_conditions_response(mocker, in
     bad_response = {
         "code": 200,
         "conditions": [{'station_id': 123, 'fault_status': 11, 'message': 'no data'}],  # Real bad response from vitalweather
-        "unites": {},
+        "unites": {
+            "local_time_last_update": "UTC",
+            "ts": "s",
+            "temperature": "°C",
+            "humidity": "%",
+            "pressure": "mb",
+            "wind_average": "kph",
+            "wind_direction": "deg",
+            "total_rain": "mm",
+            "solar_radiation": "W/M2",
+            "FDI": "index"
+        },
         "generated_at": "2025-05-12T00:00:00Z",
         "message": "ok"
     }
@@ -201,7 +259,7 @@ async def test_action_pull_station_conditions_bad_conditions_response(mocker, in
 
     mocker.patch("httpx.AsyncClient.get", return_value=mock_httpx_response)
 
-    mock_log = mocker.patch("app.actions.client.log_action_activity", new_callable=AsyncMock)
+    mock_log = mocker.patch("app.actions.handlers.log_action_activity", new_callable=AsyncMock)
 
     result = await action_pull_station_conditions(integration, action_config)
 

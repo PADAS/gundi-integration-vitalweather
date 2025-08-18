@@ -1,6 +1,7 @@
 import httpx
 import logging
 import datetime
+import pydantic
 
 import app.actions.client as client
 
@@ -11,8 +12,9 @@ from app.actions.configurations import (
     FetchDailySummaryConfig,
     get_auth_config
 )
+from gundi_core.schemas.v2 import LogLevel
 from app.services.action_scheduler import trigger_action, crontab_schedule
-from app.services.activity_logger import activity_logger
+from app.services.activity_logger import activity_logger, log_action_activity
 from app.services.gundi import send_observations_to_gundi, send_events_to_gundi
 from app.services.state import IntegrationStateManager
 from app.services.utils import generate_batches
@@ -77,13 +79,19 @@ async def action_auth(integration, action_config: AuthenticateConfig):
     logger.info(f"Executing 'auth' action with integration ID {integration.id} and action_config {action_config}...")
 
     base_url = integration.base_url or VW_BASE_URL
+    key = action_config.key.get_secret_value()
 
     try:
-        response = await client.get_stations(integration, base_url, action_config)
+        response = await client.get_stations(integration, base_url, key)
         if not response:
             logger.error(f"Failed to authenticate with integration {integration.id} using {action_config}")
             return {"valid_credentials": False, "message": "Bad credentials"}
-        return {"valid_credentials": True}
+        try:
+            client.StationsResponse.parse_obj(response)
+            return {"valid_credentials": True}
+        except pydantic.ValidationError:
+            logger.error(f"Failed to authenticate with integration {integration.id} using {action_config}")
+            return {"valid_credentials": False, "message": "Bad credentials"}
     except (client.VWUnauthorizedException, client.VWNotFoundException, client.VWException) as e:
         return {"valid_credentials": False, "status_code": e.status_code, "message": e.message}
     except httpx.HTTPStatusError as e:
@@ -96,13 +104,28 @@ async def action_pull_observations(integration, action_config: PullObservationsC
 
     base_url = integration.base_url or VW_BASE_URL
     auth_config = get_auth_config(integration)
+    key = auth_config.key.get_secret_value()
 
     try:
-        response = await client.get_stations(integration, base_url, auth_config)
+        response = await client.get_stations(integration, base_url, key)
         if response:
-            logger.info(f"Found {len(response.stations)} stations for integration {integration.id}")
+            try:
+                stations_response = client.StationsResponse.parse_obj(response)
+            except pydantic.ValidationError as e:
+                msg = f"Response: {response['stations']}. Exception: {e}"
+                logger.error(msg)
+                await log_action_activity(
+                    integration_id=integration.id,
+                    action_id="pull_observations",
+                    level=LogLevel.ERROR,
+                    title=f"Get stations error",
+                    data={"message": msg}
+                )
+                raise
+
+            logger.info(f"Found {len(stations_response.stations)} stations for integration {integration.id}")
             stations_triggered = 0
-            for station in response.stations:
+            for station in stations_response.stations:
                 logger.info(f"Triggering 'action_pull_station_conditions' action for station {station.Station_ID} to extract observations...")
 
                 parsed_config = PullStationConditionsConfig(
@@ -132,9 +155,39 @@ async def action_pull_station_conditions(integration, action_config: PullStation
     auth_config = get_auth_config(integration)
     observations_extracted = 0
 
+    key = auth_config.key.get_secret_value()
+
     try:
-        conditions_response = await client.get_station_conditions(integration, base_url, action_config, auth_config)
+        conditions_response = await client.get_station_conditions(integration, base_url, action_config.station.Station_ID, key)
         if conditions_response:
+            # filter conditions with fault_status, log a warning if any and remove them from conditions_response
+            for condition in conditions_response["conditions"]:
+                if condition.get("fault_status", 0) != 0:
+                    faults = f'Fault status: {condition.get("fault_status")}', f'Message: {condition.get("message")}'
+                    msg = f"Station {action_config.station.Station_ID} has a fault status. Response: {condition}"
+                    logger.warning(msg)
+                    await log_action_activity(
+                        integration_id=integration.id,
+                        action_id="pull_station_conditions",
+                        level=LogLevel.WARNING,
+                        title=f"Station {action_config.station.Station_ID} reported an error.",
+                        data={"faults": faults}
+                    )
+                    conditions_response["conditions"].remove(condition)
+            try:
+                conditions_response = client.ConditionsResponse.parse_obj(conditions_response)
+            except pydantic.ValidationError as e:
+                msg = f"Response: {conditions_response['conditions']}. Exception: {e}"
+                logger.error(msg)
+                await log_action_activity(
+                    integration_id=integration.id,
+                    action_id="pull_station_conditions",
+                    level=LogLevel.WARNING,
+                    title=f"Get station conditions error for station '{action_config.station.Station_ID}'",
+                    data={"message": msg}
+                )
+                return None
+
             logger.info(f"Extracted {len(conditions_response.conditions)} observations for station {action_config.station.Station_ID}.")
             transformed_data = transform(action_config.station, conditions_response)
 
@@ -164,16 +217,31 @@ async def action_fetch_daily_summary(integration, action_config: FetchDailySumma
 
     base_url = integration.base_url or VW_BASE_URL
     auth_config = get_auth_config(integration)
+    key = auth_config.key.get_secret_value()
 
     summaries_fetched = 0
 
     try:
-        stations = await client.get_stations(integration, base_url, auth_config)
+        stations = await client.get_stations(integration, base_url, key)
         if stations:
             logger.info(f"Found {len(stations.stations)} stations for integration {integration.id}")
             for station in stations.stations:
-                daily_summary = await client.get_daily_summary(integration, base_url, station, auth_config)
+                daily_summary = await client.get_daily_summary(integration, base_url, station.Station_ID, key)
                 if daily_summary:
+                    try:
+                        daily_summary = client.DailySummaryResponse.parse_obj(daily_summary)
+                    except pydantic.ValidationError as e:
+                        msg = f"Response: {daily_summary['dailysummary']}. Exception: {e}"
+                        logger.error(msg)
+                        await log_action_activity(
+                            integration_id=integration.id,
+                            action_id="fetch_daily_summary",
+                            level=LogLevel.WARNING,
+                            title=f"Get station daily summary error for station '{station.Station_ID}'",
+                            data={"message": msg}
+                        )
+                        raise
+
                     for station_summary in daily_summary.dailysummary:
                         logger.info(f"Sending daily summary for station {station_summary.station_id} Date: {station_summary.Date}.")
                         transformed_data = transform_daily_summary(station_summary, daily_summary.units, station)
