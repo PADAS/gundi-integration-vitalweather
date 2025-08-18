@@ -186,7 +186,7 @@ async def action_pull_station_conditions(integration, action_config: PullStation
                     title=f"Get station conditions error for station '{action_config.station.Station_ID}'",
                     data={"message": msg}
                 )
-                return None
+                raise
 
             logger.info(f"Extracted {len(conditions_response.conditions)} observations for station {action_config.station.Station_ID}.")
             transformed_data = transform(action_config.station, conditions_response)
@@ -224,6 +224,19 @@ async def action_fetch_daily_summary(integration, action_config: FetchDailySumma
     try:
         stations = await client.get_stations(integration, base_url, key)
         if stations:
+            try:
+                stations = client.StationsResponse.parse_obj(stations)
+            except pydantic.ValidationError as e:
+                msg = f"Response: {stations['stations']}. Exception: {e}"
+                logger.error(msg)
+                await log_action_activity(
+                    integration_id=integration.id,
+                    action_id="pull_observations",
+                    level=LogLevel.ERROR,
+                    title=f"Get stations error",
+                    data={"message": msg}
+                )
+                raise
             logger.info(f"Found {len(stations.stations)} stations for integration {integration.id}")
             for station in stations.stations:
                 daily_summary = await client.get_daily_summary(integration, base_url, station.Station_ID, key)
