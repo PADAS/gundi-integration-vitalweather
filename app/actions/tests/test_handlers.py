@@ -2,8 +2,8 @@ import pytest
 
 from app import settings
 from unittest.mock import AsyncMock, MagicMock
-from datetime import datetime
 from app.actions.handlers import (
+    LogLevel,
     action_auth,
     action_pull_observations,
     action_pull_station_conditions,
@@ -15,7 +15,7 @@ from app.actions.configurations import (
     PullStationConditionsConfig,
     FetchDailySummaryConfig
 )
-from app.actions.client import VWException, Station, StationsResponse, DailySummaryResponse, LogLevel
+from app.actions.client import VWException, Station, StationsResponse, DailySummaryResponse
 
 
 @pytest.mark.asyncio
