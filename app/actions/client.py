@@ -161,10 +161,8 @@ class VWUnauthorizedException(Exception):
 
 
 @stamina.retry(on=httpx.HTTPError, wait_initial=4.0, wait_jitter=5.0, wait_max=32.0)
-async def get_stations(integration, base_url, key):
+async def get_stations(base_url, key):
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=30.0, write=15.0, pool=5.0)) as session:
-        logger.info(f"-- Getting stations for integration ID: {integration.id} --")
-
         url = f"{base_url}/stations.php"
 
         try:
@@ -191,14 +189,12 @@ async def get_stations(integration, base_url, key):
 
 
 @stamina.retry(on=httpx.HTTPError, wait_initial=4.0, wait_jitter=5.0, wait_max=32.0)
-async def get_station_conditions(integration, base_url, station_id, key):
+async def get_station_conditions(base_url, station_id, key):
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=30.0, write=15.0, pool=5.0)) as session:
         url = f"{base_url}/conditions.php/{station_id}"
         params = {
             "key": key,
         }
-
-        logger.info(f"-- Getting latest conditions for integration ID: {integration.id} Station ID: {station_id} --")
 
         try:
             response = await session.get(url, params=params)
@@ -224,14 +220,12 @@ async def get_station_conditions(integration, base_url, station_id, key):
 
 
 @stamina.retry(on=httpx.HTTPError, wait_initial=4.0, wait_jitter=5.0, wait_max=32.0)
-async def get_daily_summary(integration, base_url, station_id, key):
+async def get_daily_summary(base_url, station_id, key):
     async with httpx.AsyncClient(timeout=httpx.Timeout(connect=10.0, read=30.0, write=15.0, pool=5.0)) as session:
         url = f"{base_url}/dailysummary.php/{station_id}"
         params = {
             "key": key,
         }
-
-        logger.info(f"-- Getting daily summary for integration ID: {integration.id} Station: {station_id} --")
 
         try:
             response = await session.get(url, params=params)

@@ -82,7 +82,8 @@ async def action_auth(integration, action_config: AuthenticateConfig):
     key = action_config.key.get_secret_value()
 
     try:
-        response = await client.get_stations(integration, base_url, key)
+        logger.info(f"-- Getting stations for integration ID: {integration.id} --")
+        response = await client.get_stations(base_url, key)
         if not response:
             logger.error(f"Failed to authenticate with integration {integration.id} using {action_config}")
             return {"valid_credentials": False, "message": "Bad credentials"}
@@ -107,7 +108,8 @@ async def action_pull_observations(integration, action_config: PullObservationsC
     key = auth_config.key.get_secret_value()
 
     try:
-        response = await client.get_stations(integration, base_url, key)
+        logger.info(f"-- Getting stations for integration ID: {integration.id} --")
+        response = await client.get_stations(base_url, key)
         if response:
             try:
                 stations_response = client.StationsResponse.parse_obj(response)
@@ -158,22 +160,28 @@ async def action_pull_station_conditions(integration, action_config: PullStation
     key = auth_config.key.get_secret_value()
 
     try:
-        conditions_response = await client.get_station_conditions(integration, base_url, action_config.station.Station_ID, key)
+        logger.info(f"-- Getting latest conditions for integration ID: {integration.id} Station ID: {action_config.station.Station_ID} --")
+        conditions_response = await client.get_station_conditions(base_url, action_config.station.Station_ID, key)
         if conditions_response:
-            # filter conditions with fault_status, log a warning if any and remove them from conditions_response
+            valid_conditions = []
             for condition in conditions_response["conditions"]:
                 if condition.get("fault_status", 0) != 0:
-                    faults = f'Fault status: {condition.get("fault_status")}', f'Message: {condition.get("message")}'
+                    fault = {
+                        "fault_status": condition.get("fault_status"),
+                        "message": condition.get("message")
+                    }
                     msg = f"Station {action_config.station.Station_ID} has a fault status. Response: {condition}"
                     logger.warning(msg)
                     await log_action_activity(
                         integration_id=integration.id,
-                        action_id="pull_station_conditions",
+                        action_id="pull_observations",
                         level=LogLevel.WARNING,
                         title=f"Station {action_config.station.Station_ID} reported an error.",
-                        data={"faults": faults}
+                        data={"faults": fault}
                     )
-                    conditions_response["conditions"].remove(condition)
+                else:
+                    valid_conditions.append(condition)
+            conditions_response["conditions"] = valid_conditions
             try:
                 conditions_response = client.ConditionsResponse.parse_obj(conditions_response)
             except pydantic.ValidationError as e:
@@ -222,7 +230,8 @@ async def action_fetch_daily_summary(integration, action_config: FetchDailySumma
     summaries_fetched = 0
 
     try:
-        stations = await client.get_stations(integration, base_url, key)
+        logger.info(f"-- Getting stations for integration ID: {integration.id} --")
+        stations = await client.get_stations(base_url, key)
         if stations:
             try:
                 stations = client.StationsResponse.parse_obj(stations)
@@ -239,7 +248,8 @@ async def action_fetch_daily_summary(integration, action_config: FetchDailySumma
                 raise
             logger.info(f"Found {len(stations.stations)} stations for integration {integration.id}")
             for station in stations.stations:
-                daily_summary = await client.get_daily_summary(integration, base_url, station.Station_ID, key)
+                logger.info(f"-- Getting daily summary for integration ID: {integration.id} Station: {station.Station_ID} --")
+                daily_summary = await client.get_daily_summary(base_url, station.Station_ID, key)
                 if daily_summary:
                     try:
                         daily_summary = client.DailySummaryResponse.parse_obj(daily_summary)

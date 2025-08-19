@@ -268,7 +268,7 @@ async def test_action_pull_station_conditions_fault_status_sends_warning_activit
     # Check that the log was created
     assert mock_log.await_count == 1
     assert mock_log.call_args[1]["integration_id"] == integration.id
-    assert mock_log.call_args[1]["action_id"] == "pull_station_conditions"
+    assert mock_log.call_args[1]["action_id"] == "pull_observations"
     assert mock_log.call_args[1]["level"] == LogLevel.WARNING
     assert mock_log.call_args[1]["title"] == f"Station 123 reported an error."
 
