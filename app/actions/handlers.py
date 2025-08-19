@@ -231,7 +231,7 @@ async def action_fetch_daily_summary(integration, action_config: FetchDailySumma
                 logger.error(msg)
                 await log_action_activity(
                     integration_id=integration.id,
-                    action_id="pull_observations",
+                    action_id="fetch_daily_summary",
                     level=LogLevel.ERROR,
                     title=f"Get stations error",
                     data={"message": msg}
