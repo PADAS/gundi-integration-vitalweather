@@ -1,9 +1,9 @@
 import pytest
 
 from app import settings
-from unittest.mock import AsyncMock
-from datetime import datetime
+from unittest.mock import AsyncMock, MagicMock
 from app.actions.handlers import (
+    LogLevel,
     action_auth,
     action_pull_observations,
     action_pull_station_conditions,
@@ -22,8 +22,21 @@ from app.actions.client import VWException, Station, StationsResponse, DailySumm
 async def test_action_auth_success(mocker):
     mock_integration = mocker.Mock()
     mock_action_config = AuthenticateConfig(key="testkey")
-    mock_response = mocker.Mock()
-    mock_response.stations = [mocker.Mock()]
+
+    mock_response = {
+        "stations": [
+            {
+                "Station_ID": 123,
+                "Station_Name": "Test Station",
+                "latitude": -33.9,
+                "longitude": 18.4,
+                "height": 10
+            }
+        ],
+        "generated_at": 1755016414,
+        "code": 200,
+        "message": "ok"
+    }
 
     mocker.patch('app.actions.client.get_stations', new=AsyncMock(return_value=mock_response))
 
@@ -120,13 +133,47 @@ async def test_action_pull_station_conditions_success(mocker, integration_v2, mo
             height=166.6
         )
     )
-    mock_conditions_response = mocker.Mock()
-    mock_conditions_response.conditions = [mocker.Mock(ts=datetime.fromtimestamp(1234567890))]
 
     integration = integration_v2
 
     # Modify auth config
     integration.configurations[2].data = {"key": "testkey"}
+
+    mock_conditions_response = {
+        "code": 200,
+        "conditions": [
+            {
+                "station_id": 123,
+                "station_Name": "Test Station",
+                "pressure": 995.3,
+                "temperature": 25.6,
+                "humidity": 88,
+                "wind_average": 0.0,
+                "max_wind": 3.2,
+                "wind_direction": 180,
+                "total_rain": 0.0,
+                "FDI": 0,
+                "solar_radiation": 0.0,
+                "fault_status": 0,
+                "message": "ok",
+                "ts": 1234567890
+            }
+        ],
+        "unites": {
+            "local_time_last_update": "UTC",
+            "ts": "s",
+            "temperature": "°C",
+            "humidity": "%",
+            "pressure": "mb",
+            "wind_average": "kph",
+            "wind_direction": "deg",
+            "total_rain": "mm",
+            "solar_radiation": "W/M2",
+            "FDI": "index"
+        },
+        "generated_at": "2025-05-12T00:00:00Z",
+        "message": "ok"
+    }
 
     mocker.patch("app.services.state.IntegrationStateManager.get_state", return_value=None)
     mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
@@ -160,6 +207,71 @@ async def test_action_pull_station_conditions_success(mocker, integration_v2, mo
 
     result = await action_pull_station_conditions(integration, action_config)
     assert result == {"observations_extracted": 1}
+
+
+@pytest.mark.asyncio
+async def test_action_pull_station_conditions_fault_status_sends_warning_activity_log(mocker, integration_v2, mock_publish_event):
+    action_config = PullStationConditionsConfig(
+        station=Station(
+            Station_ID=123,
+            Station_Name="Test Station",
+            latitude=-15.92883055,
+            longitude=34.606880555,
+            height=166.6
+        )
+    )
+
+    integration = integration_v2
+
+    # Modify auth config
+    integration.configurations[2].data = {"key": "testkey"}
+
+    mocker.patch("app.services.state.IntegrationStateManager.get_state", return_value=None)
+    mocker.patch("app.services.activity_logger.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_runner.publish_event", mock_publish_event)
+    mocker.patch("app.services.action_scheduler.publish_event", mock_publish_event)
+    mocker.patch('app.services.state.IntegrationStateManager.set_state', new=AsyncMock())
+
+    bad_response = {
+        "code": 200,
+        "conditions": [{'station_id': 123, 'fault_status': 11, 'message': 'no data'}],  # Real bad response from vitalweather
+        "unites": {
+            "local_time_last_update": "UTC",
+            "ts": "s",
+            "temperature": "°C",
+            "humidity": "%",
+            "pressure": "mb",
+            "wind_average": "kph",
+            "wind_direction": "deg",
+            "total_rain": "mm",
+            "solar_radiation": "W/M2",
+            "FDI": "index"
+        },
+        "generated_at": "2025-05-12T00:00:00Z",
+        "message": "ok"
+    }
+
+    mock_httpx_response = MagicMock()
+    mock_httpx_response.is_error = False
+    mock_httpx_response.json.return_value = bad_response
+    mock_httpx_response.text = str(bad_response)
+    mock_httpx_response.raise_for_status = MagicMock()
+
+    mocker.patch("httpx.AsyncClient.get", return_value=mock_httpx_response)
+
+    mock_log = mocker.patch("app.actions.handlers.log_action_activity", new_callable=AsyncMock)
+
+    result = await action_pull_station_conditions(integration, action_config)
+
+    assert result == {"observations_extracted": 0}
+
+    # Check that the log was created
+    assert mock_log.await_count == 1
+    assert mock_log.call_args[1]["integration_id"] == integration.id
+    assert mock_log.call_args[1]["action_id"] == "pull_observations"
+    assert mock_log.call_args[1]["level"] == LogLevel.WARNING
+    assert mock_log.call_args[1]["title"] == f"Station 123 reported an error."
+
 
 @pytest.mark.asyncio
 async def test_action_pull_station_conditions_error(mocker, integration_v2, mock_publish_event):
